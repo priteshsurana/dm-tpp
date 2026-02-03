@@ -101,8 +101,68 @@ RECEIVED < VALIDATED < PERSISTED < DISPATCHED < EXECUTED < FINALIZED < FAILED(te
 - Errors propagate to structured logs
 
 ---
-Todo:
+### INV-008: External Event Ordering Preserved
+**Statement**: Events from the same source (same idempotency key prefix) maintain their relative order through the system.
+
+**Implementation**:
+- Kafka partitioning by idempotency key ensures ordered delivery within partition
+- Consumer processes messages from same partition sequentially
+- State transitions for same transaction happen sequentially
+
+**Verification**:
+- Send events E1, E2, E3 with same key
+- Verify state log shows sequential processing: E1-> E2-> E3
+- Check: timestamp (E1_processes) < timestamp(E2_processed) < timestamp(E3_processed)
+
+**Consequences if violated**:
+- Out-of-order processing could lead to incorrect final state
+- Lost update problem (E2 overwrites E3's changes)
 ---
+
+### INV-009: At-Most-Once External Effect
+**Statement**: Each idempotency key produces at most one finalized transaction with external effects.
+
+**Implementation**:
+- Before any external effect (email, webhook, payment), check Postgres for existing finalized transaction
+- External effet execution is idempotent (safe to retry)
+- Effect log stored in Postgres ties effect to transaction
+
+**Verification**:
+```sql
+-- Check no duplicates effects
+SELECT idempotency_key, COUNT(*)
+FROM external_effects
+WHERE effect_type = 'payment_processed'
+GROUP BY idempotency_key
+HAVING COUNT(*) >1;
+-- Expected: 0 rows
+```
+**Consequences if violated**:
+- Double-charge customer
+- Send duplicate notifications
+- Violate regulatory requirements
+
+---
+
+### INV-010: Finite State Machine Completeness
+**Statement**: Every possible system state has a defined next state or is explicitly terminal.
+**Implementation**:
+- State machine enum explicitly lists all valid states
+- Transition matrix defines all allowed transitions
+- Invalid transitions rejected at compile-time or runtime with clear error
+
+** Verification**:
+- Code review: ensure every state in eunum has transition rules
+- Test: attempt all N^2 possible transitions, verify all invalid ones are rejected
+- Check: no state can be "stuck" indefinitely(all non-terminal states have outbound transitions)
+
+**Consequences if violated**:
+- Transactions stuck in limbo state
+- Manual intervention required for recovery
+- SLA violations
+
+---
+
 
 ## Anti-Invariants (Explicitly NOT Guaranteed)
 
@@ -130,3 +190,4 @@ We do NOT guarantee global message order. We guarantee per-key ordering in Kafka
 ## Open Questions
 - Should FAILED state allow retry to RECEIVED? (Decision: No, create new txn)
 - What happens if Postgres is partitioned during state transition? (See failure_model.md)
+

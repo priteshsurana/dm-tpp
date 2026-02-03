@@ -1,0 +1,45 @@
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: dm-tpp-postgres
+    environment:
+      POSTGRES_DB: dm_tpp
+      POSTGRES_USER: dm_tpp_user
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/postgres_data
+    command:
+      - "postgres"
+      - "-c"
+      - "log_statement=all"
+      - "-c"
+      - "log_duration=on"
+      - "-c"
+      - "log_lock_waits=on"
+      - "-c"
+      - "log_line_prefix=%m [%p] %q%u@%d "
+      - "-c"
+      - "max_connections=200"
+      - "-c"
+      - "shared_buffers=256MB"
+    networks:
+      - dm-tpp-network
+
+  toxiproxy:
+    image: ghcr.io/shopify/toxiproxy:latest
+    container_name: dm-tpp-toxiproxy
+    ports:
+      - "8474:8474"  # Toxiproxy API
+      - "5433:5433"  # Proxy for Postgres
+    networks:
+      - dm-tpp-network
+
+volumes:
+  postgres_data:
+
+networks:
+  dm-tpp-network:
+    driver: bridge
